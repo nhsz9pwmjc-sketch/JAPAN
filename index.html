@@ -79,6 +79,21 @@ nav button.on{color:var(--acc2)}
 .busy{display:flex;align-items:center;gap:10px;color:var(--mut);font-size:14px;margin:8px 0}
 .spin{width:18px;height:18px;border:2px solid var(--line);border-top-color:var(--acc2);border-radius:50%;animation:sp 1s linear infinite}
 @keyframes sp{to{transform:rotate(360deg)}}
+.scanner{position:fixed;inset:0;background:#000;z-index:20}
+.scanner video{position:absolute;inset:0;width:100%;height:100%;object-fit:cover}
+.scanner .frame{position:absolute;left:7%;width:86%;top:36%;height:15vw;min-height:56px;border:3px solid var(--acc2);border-radius:10px;box-shadow:0 0 0 100vmax rgba(0,0,0,.55)}
+.scanner .frame span{position:absolute;left:0;right:0;top:-34px;text-align:center;color:#fff;font-size:14px;font-weight:600}
+.scanner .status{position:absolute;left:16px;right:16px;top:calc(36% + 15vw + 20px);text-align:center;color:#fff;font-size:13px;font-family:ui-monospace,Menlo,monospace;opacity:.85}
+.scanbar{position:absolute;left:0;right:0;bottom:0;display:flex;justify-content:space-around;align-items:center;padding:16px 16px calc(env(safe-area-inset-bottom) + 24px)}
+.scanbar .btn{background:rgba(255,255,255,.16);border:0;color:#fff}
+.shutter{width:72px;height:72px;border-radius:50%;background:#fff;border:5px solid rgba(255,255,255,.35);background-clip:padding-box}
+.reslist{margin-top:8px;max-height:330px;overflow:auto;border:1px solid var(--line);border-radius:10px}
+.res{display:flex;justify-content:space-between;align-items:center;gap:8px;padding:10px 12px;border:0;border-bottom:1px solid var(--line);background:none;width:100%;text-align:left;color:var(--text);font-size:14px}
+.res:last-child{border-bottom:0}
+.res .c{font-size:12px;color:var(--mut)}
+.res b{white-space:nowrap;color:var(--acc2)}
+.sel{margin-top:10px;padding:10px;border-radius:10px;background:var(--card2)}
+.sel .pbox{background:var(--card)}
 .ocrraw{font-family:ui-monospace,Menlo,monospace;font-size:11px;color:var(--mut);white-space:pre-wrap;max-height:80px;overflow:auto;margin-top:6px}
 </style>
 </head>
@@ -98,7 +113,7 @@ nav button.on{color:var(--acc2)}
   </div>
   <input type="file" id="inPhoto" accept="image/*" capture="environment" class="hidden">
   <input type="file" id="inBarcode" accept="image/*" capture="environment" class="hidden">
-  <p class="mut" id="hint">Tipp: Karte hochkant und formatfüllend fotografieren, damit Set-Kürzel und Nummer unten links gut lesbar sind.</p>
+  <p class="mut" id="hint">Tipp Karte: Kamera nah an die Karte halten, sodass Set-Kürzel und Nummer (unten links) im gelben Rahmen liegen. Die App liest automatisch.</p>
 
   <!-- Karte -->
   <div class="box hidden" id="pCard">
@@ -120,10 +135,19 @@ nav button.on{color:var(--acc2)}
   <div class="box hidden" id="pSealed">
     <img class="preview hidden" id="sealedPreview" alt="">
     <div class="busy hidden" id="bcBusy"><div class="spin"></div><span>Lese Barcode …</span></div>
-    <label>Barcode (JAN)</label>
-    <input id="fJan" inputmode="numeric" placeholder="wird beim Scannen ausgefüllt">
+    <div class="row">
+      <div><label>Barcode (JAN)</label><input id="fJan" inputmode="numeric" placeholder="per Scan oder eintippen"></div>
+      <div class="shrink"><button class="btn" id="btnBarcode2">▥ Scannen</button></div>
+    </div>
+    <label>Cardmarket-Produkt suchen <span id="cmInfo"></span></label>
+    <input id="fCmSearch" placeholder="z. B. Terastal Festival Booster Box" autocomplete="off" autocorrect="off">
+    <div class="reslist hidden" id="cmResults"></div>
+    <div class="sel hidden" id="cmSel"></div>
     <label>Produktname</label>
-    <input id="fSealedName" placeholder="z. B. Terastal Festival ex Display">
+    <input id="fSealedName" placeholder="wird bei Auswahl ausgefüllt">
+    <label>UVP in ¥ (optional, offizieller Ladenpreis)</label>
+    <input id="fUvp" inputmode="numeric" placeholder="z. B. 5400">
+    <div class="mut">Barcode, Produkt und UVP merkt sich die App – beim nächsten Scan ist alles sofort da.</div>
     <div class="links" id="sealedLinks"></div>
   </div>
 
@@ -134,6 +158,9 @@ nav button.on{color:var(--acc2)}
       <button data-v="Karte" class="on">Karte</button>
       <button data-v="Graded">Graded</button>
       <button data-v="Sealed">Sealed</button>
+    </div>
+    <div id="condRow"><label>Zustand</label>
+      <select id="fCond"><option value="MT">Mint (MT)</option><option value="NM" selected>Near Mint (NM)</option><option value="EX">Excellent (EX)</option><option value="GD">Good (GD)</option><option value="LP">Light Played (LP)</option><option value="PL">Played (PL)</option><option value="PO">Poor (PO)</option></select>
     </div>
     <div class="row hidden" id="gradeRow">
       <div><label>Grading-Firma</label><select id="fGrader"><option>PSA</option><option>BGS</option><option>CGC</option><option>ARS</option><option>Andere</option></select></div>
@@ -181,6 +208,11 @@ nav button.on{color:var(--acc2)}
     <button class="btn full" id="btnRateReload">Kurs neu laden</button>
   </div>
   <div class="box">
+    <h2 style="margin-top:0">Marktpreis-Basis</h2>
+    <select id="fMktBase"><option value="low">Niedrigster Cardmarket-Preis</option><option value="trend">Cardmarket-Trend</option></select>
+    <p class="mut">„Niedrigster“ ist das günstigste Angebot auf Cardmarket (EU-weit). Länder- und zustandsgenaue Preise gibt Cardmarket nicht frei heraus – dafür den Cardmarket-Link bei der Karte nutzen.</p>
+  </div>
+  <div class="box">
     <h2 style="margin-top:0">Export &amp; Backup</h2>
     <button class="btn full" id="btnExport2">Excel-Datei (.xlsx)</button>
     <button class="btn full" id="btnCsv">CSV (für Excel, Semikolon)</button>
@@ -190,8 +222,13 @@ nav button.on{color:var(--acc2)}
     <p class="mut">Alle Daten liegen nur auf diesem iPhone. Ab und zu ein Backup oder einen Excel-Export machen schadet nicht.</p>
   </div>
   <div class="box">
+    <h2 style="margin-top:0">Sealed-Preisliste (Cardmarket)</h2>
+    <div class="mut" id="cmStatus">Noch nicht geladen.</div>
+    <button class="btn full" id="btnCmReload">Preisliste neu laden</button>
+  </div>
+  <div class="box">
     <h2 style="margin-top:0">Vor dem Flug</h2>
-    <p class="mut">Einmal im WLAN „Erkennung vorbereiten“ tippen. Dann ist die Texterkennung (ca. 5 MB) schon geladen.</p>
+    <p class="mut">Einmal im WLAN „Erkennung vorbereiten“ tippen. Dann sind Texterkennung und Sealed-Preisliste schon auf dem iPhone.</p>
     <button class="btn full" id="btnWarm">Erkennung vorbereiten</button>
   </div>
   <div class="box">
@@ -200,6 +237,17 @@ nav button.on{color:var(--acc2)}
   </div>
   <p class="mut">Kartendaten &amp; Cardmarket-Preise: TCGdex · Kurs: EZB via Frankfurter · Texterkennung: Tesseract.js</p>
 </section>
+
+<div class="scanner hidden" id="scanner">
+  <video id="scanVideo" playsinline muted autoplay></video>
+  <div class="frame"><span>Set-Kürzel + Nummer in den Rahmen</span></div>
+  <div class="status" id="scanStatus">Kamera startet …</div>
+  <div class="scanbar">
+    <button class="btn" id="scanCancel">Abbrechen</button>
+    <button class="shutter" id="scanShot" aria-label="Jetzt lesen"></button>
+    <button class="btn" id="scanManual">Eintippen</button>
+  </div>
+</div>
 
 <nav>
   <button data-tab="tabAdd" class="on"><span>＋</span>Erfassen</button>
@@ -236,7 +284,8 @@ async function getJSON(url) { const r = await fetch(url); if (!r.ok) throw new E
 
 /* ---------- Zustand ---------- */
 let items = LS.get('jh_items', []);
-let settings = LS.get('jh_settings', { rateOverride: null });
+let settings = Object.assign({ rateOverride: null, mktBase: 'low' }, LS.get('jh_settings', {}));
+const BASE_LBL = () => settings.mktBase === 'low' ? 'Cardmarket-Tiefstpreis' : 'Cardmarket-Trend';
 let rate = LS.get('jh_rate', null);
 let janMap = LS.get('jh_jan', {});
 let setsCache = LS.get('jh_sets', null);
@@ -301,9 +350,11 @@ function cmPrice(card) {
   const cm = card && card.pricing && card.pricing.cardmarket;
   if (!cm) return null;
   const pick = (...k) => { for (const x of k) if (typeof cm[x] === 'number' && cm[x] > 0) return cm[x]; return null; };
-  const v = pick('trend', 'avg30', 'avg7', 'avg', 'trend-holo', 'avg30-holo', 'avg-holo', 'low', 'low-holo');
+  const trend = pick('trend', 'avg30', 'avg7', 'avg', 'trend-holo', 'avg30-holo', 'avg-holo');
+  const low = pick('low', 'low-holo');
+  const v = settings.mktBase === 'low' ? (low || trend) : (trend || low);
   if (!v) return null;
-  return { v, low: pick('low', 'low-holo'), avg30: pick('avg30', 'avg30-holo'), updated: cm.updated };
+  return { v, trend, low, avg30: pick('avg30', 'avg30-holo'), updated: cm.updated };
 }
 async function englishName(card) {
   try { const id = card.dexId && card.dexId[0]; if (!id) return null; const sp = await getJSON(`https://pokeapi.co/api/v2/pokemon-species/${id}`); const n = sp.names.find(x => x.language.name === 'en'); return n ? n.name : null; } catch (e) { return null; }
@@ -321,57 +372,216 @@ async function getWorker() {
 function loadImage(file) {
   return new Promise((res, rej) => { const img = new Image(); img.onload = () => res(img); img.onerror = rej; img.src = URL.createObjectURL(file); });
 }
-function cropCanvas(img, rx, ry, rw, rh, targetW, enhance) {
-  const W = img.naturalWidth, H = img.naturalHeight;
-  const sx = W * rx, sy = H * ry, sw = W * rw, sh = H * rh;
-  const scale = targetW / sw;
-  const c = document.createElement('canvas'); c.width = Math.round(sw * scale); c.height = Math.round(sh * scale);
-  const ctx = c.getContext('2d'); ctx.drawImage(img, sx, sy, sw, sh, 0, 0, c.width, c.height);
-  if (enhance) {
-    const d = ctx.getImageData(0, 0, c.width, c.height), p = d.data; let mn = 255, mx = 0;
-    for (let i = 0; i < p.length; i += 4) { const g = p[i] * .3 + p[i + 1] * .59 + p[i + 2] * .11; p[i] = g; if (g < mn) mn = g; if (g > mx) mx = g; }
-    const k = 255 / Math.max(1, mx - mn);
-    for (let i = 0; i < p.length; i += 4) { const g = (p[i] - mn) * k; p[i] = p[i + 1] = p[i + 2] = g; }
-    ctx.putImageData(d, 0, 0);
-  }
+function cropCanvas(img, rx, ry, rw, rh, targetW) {
+  const W = img.naturalWidth || img.videoWidth, H = img.naturalHeight || img.videoHeight;
+  return cropPx(img, W * rx, H * ry, W * rw, H * rh, targetW);
+}
+function cropPx(src, sx, sy, sw, sh, targetW) {
+  const k = targetW / sw;
+  const c = document.createElement('canvas'); c.width = Math.round(sw * k); c.height = Math.round(sh * k);
+  const ctx = c.getContext('2d'); ctx.imageSmoothingQuality = 'high'; ctx.drawImage(src, sx, sy, sw, sh, 0, 0, c.width, c.height);
   return c;
+}
+// Erzeugt Bildvarianten (Graustufen, invertiert, Schwarz/Weiß) – hilft bei heller Schrift auf dunklem Grund
+function variants(c, which) {
+  const W = c.width, H = c.height, n = W * H;
+  const p = c.getContext('2d').getImageData(0, 0, W, H).data;
+  const g = new Uint8ClampedArray(n); let mn = 255, mx = 0;
+  for (let i = 0; i < n; i++) { const v = p[i * 4] * .3 + p[i * 4 + 1] * .59 + p[i * 4 + 2] * .11; g[i] = v; if (v < mn) mn = v; if (v > mx) mx = v; }
+  const k = 255 / Math.max(1, mx - mn), hist = new Array(256).fill(0);
+  for (let i = 0; i < n; i++) { g[i] = (g[i] - mn) * k; hist[g[i]]++; }
+  let sum = 0; for (let t = 0; t < 256; t++) sum += t * hist[t];
+  let sB = 0, wB = 0, best = 0, th = 128;
+  for (let t = 0; t < 256; t++) { wB += hist[t]; if (!wB) continue; const wF = n - wB; if (!wF) break; sB += t * hist[t]; const b = wB * wF * (sB / wB - (sum - sB) / wF) ** 2; if (b > best) { best = b; th = t; } }
+  const fns = { gray: v => v, inv: v => 255 - v, bin: v => v > th ? 255 : 0, binInv: v => v > th ? 0 : 255 };
+  return which.map(w => {
+    const o = document.createElement('canvas'); o.width = W; o.height = H; const ctx = o.getContext('2d');
+    const od = ctx.createImageData(W, H), f = fns[w];
+    for (let i = 0; i < n; i++) { const v = f(g[i]); od.data[i * 4] = od.data[i * 4 + 1] = od.data[i * 4 + 2] = v; od.data[i * 4 + 3] = 255; }
+    ctx.putImageData(od, 0, 0); return o;
+  });
 }
 function parseOCR(t) {
   let txt = ' ' + t.replace(/[|\\]/g, '/').replace(/\s+/g, ' ') + ' ';
-  txt = txt.replace(/\b5V(?=\d)/gi, 'SV').replace(/\bSV\s+(\d)/gi, 'SV$1');
+  txt = txt.replace(/\b5V(?=[\dZOIl])/gi, 'SV').replace(/\bSV\s+(\d)/gi, 'SV$1')
+           .replace(/\bSVZ/gi, 'SV2').replace(/\bSV[Il](?=\d|[a-z]\b)/g, 'SV1');
   let n = null, den = null, code = null;
   const promo = txt.match(/(\d{3})\s*\/\s*(S[VM]?-?P)\b/i);
   if (promo) { n = promo[1]; code = promo[2].toUpperCase(); }
   const m = txt.match(/(\d{1,3})\s*\/\s*(\d{2,3})(?!\d)/);
   if (!n && m) { n = m[1]; den = m[2]; }
+  if (!n && typeof setsCache !== 'undefined' && setsCache) {
+    // Schrägstrich als 1/7/I gelesen: nur akzeptieren, wenn der Nenner eine echte Set-Größe ist
+    const dens = new Set(setsCache.list.map(s => String(s.official)).filter(Boolean));
+    const re = /(\d{3})[17Il](\d{2,3})(?!\d)/g; let mm; const flat = txt.replace(/\s/g, '');
+    while ((mm = re.exec(flat))) { if (dens.has(String(parseInt(mm[2], 10)))) { n = mm[1]; den = mm[2]; break; } }
+  }
   if (!code) {
     const c = txt.match(/\b(SV\d{1,2}[a-zA-Z]?|SM\d{1,2}[a-zA-Z+]?|S\d{1,2}[a-zA-Z]?|M\d{1,2}[a-zA-Z]?|SV-?P|S-?P)\b/i);
     if (c) code = c[1];
   }
   return { n, den, code };
 }
+async function ocrCanvases(cs, psm) {
+  const w = await getWorker(); await w.setParameters({ tessedit_pageseg_mode: psm });
+  const found = { n: null, den: null, code: null }; let raw = '';
+  for (const cv of cs) {
+    const { data } = await w.recognize(cv); raw += data.text + '\n';
+    const p = parseOCR(data.text);
+    if (!found.n && p.n) { found.n = p.n; found.den = p.den; }
+    if (!found.code && p.code) found.code = p.code;
+    if (found.n && found.code) break;
+  }
+  return { found, raw };
+}
+// Foto-Fallback (wenn Live-Kamera nicht geht)
 async function runOCR(file) {
   const img = await loadImage(file);
-  $('#cardPreview').src = img.src; $('#cardPreview').classList.remove('hidden');
   $('#ocrBusy').classList.remove('hidden'); $('#ocrMsg').textContent = ocrWorker ? 'Lese Kartennummer …' : 'Lade Texterkennung (einmalig) …';
-  const found = { n: null, den: null, code: null }; let raw = '';
+  const found = { n: null, den: null, code: null }; let raw = '', prev = null;
   try {
-    const w = await getWorker();
-    $('#ocrMsg').textContent = 'Lese Kartennummer …';
-    const passes = [[0, .84, .62, .16], [0, .72, 1, .28], [0, 0, 1, 1]];
-    for (const [x, y, ww, hh] of passes) {
-      const cv = cropCanvas(img, x, y, ww, hh, ww === 1 && hh === 1 ? 1400 : 1800, true);
-      const { data } = await w.recognize(cv);
-      raw += data.text + '\n';
-      const p = parseOCR(data.text);
-      if (!found.n && p.n) { found.n = p.n; found.den = p.den; }
-      if (!found.code && p.code) found.code = p.code;
+    await getWorker(); $('#ocrMsg').textContent = 'Lese Kartennummer …';
+    for (const [x, y, ww, hh, psm] of [[0, .84, .62, .16, '6'], [0, .72, 1, .28, '6'], [0, 0, 1, 1, '11']]) {
+      const base = cropCanvas(img, x, y, ww, hh, ww === 1 && hh === 1 ? 1400 : 1800); if (!prev) prev = base;
+      const r = await ocrCanvases(variants(base, ['gray', 'inv', 'binInv']), psm);
+      raw += r.raw;
+      if (!found.n && r.found.n) { found.n = r.found.n; found.den = r.found.den; }
+      if (!found.code && r.found.code) found.code = r.found.code;
       if (found.n && found.code) break;
     }
   } catch (e) { toast('Texterkennung nicht verfügbar – bitte manuell eingeben'); }
   $('#ocrBusy').classList.add('hidden');
-  $('#ocrRaw').textContent = 'Gelesen: ' + raw.trim().slice(0, 400); $('#ocrRaw').classList.toggle('hidden', !raw.trim());
-  return found;
+  return { found, raw, preview: img.src };
+}
+
+/* ---------- Live-Scanner für Karten ---------- */
+let scanStream = null, scanBusy = false, scanLoop = null;
+async function openScanner() {
+  resetForm('card'); getSets().catch(() => {});
+  $('#scanner').classList.remove('hidden'); $('#scanStatus').textContent = 'Kamera startet …';
+  try {
+    scanStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: 'environment' }, width: { ideal: 3840 }, height: { ideal: 2160 } }, audio: false });
+    const v = $('#scanVideo'); v.srcObject = scanStream; await v.play();
+    $('#scanStatus').textContent = ocrWorker ? 'Rahmen über Set-Kürzel und Nummer halten' : 'Lade Texterkennung (einmalig) …';
+    await getWorker();
+    if (!scanStream) return;
+    $('#scanStatus').textContent = 'Rahmen über Set-Kürzel und Nummer halten';
+    scanLoop = setInterval(() => scanFrame(false), 900);
+  } catch (e) {
+    closeScanner(); toast('Live-Kamera nicht verfügbar – Foto-Modus');
+    $('#inPhoto').value = ''; $('#inPhoto').click();
+  }
+}
+function closeScanner() {
+  clearInterval(scanLoop); scanLoop = null;
+  if (scanStream) { scanStream.getTracks().forEach(t => t.stop()); scanStream = null; }
+  $('#scanVideo').srcObject = null; $('#scanner').classList.add('hidden');
+}
+async function scanFrame(manual) {
+  if (scanBusy || !scanStream) return;
+  scanBusy = true;
+  try {
+    const v = $('#scanVideo'), f = $('#scanner .frame'), vw = v.videoWidth, vh = v.videoHeight;
+    if (!vw) return;
+    const vr = v.getBoundingClientRect(), fr = f.getBoundingClientRect();
+    const sc = Math.max(vr.width / vw, vr.height / vh), ox = (vr.width - vw * sc) / 2, oy = (vr.height - vh * sc) / 2;
+    let sx = (fr.left - vr.left - ox) / sc, sy = (fr.top - vr.top - oy) / sc, sw = fr.width / sc, sh = fr.height / sc;
+    const mx = sw * .03, my = sh * .12;
+    sx = Math.max(0, sx - mx); sy = Math.max(0, sy - my); sw = Math.min(vw - sx, sw + 2 * mx); sh = Math.min(vh - sy, sh + 2 * my);
+    const base = cropPx(v, sx, sy, sw, sh, 1600);
+    const { found, raw } = await ocrCanvases(variants(base, manual ? ['gray', 'inv', 'bin', 'binInv'] : ['gray', 'inv']), '6');
+    if (!scanStream) return;
+    const line = raw.replace(/\s+/g, ' ').trim();
+    $('#scanStatus').textContent = line ? 'Lese: ' + line.slice(0, 50) : 'Suche …';
+    if (found.n && (found.code || found.den)) {
+      if (navigator.vibrate) navigator.vibrate(60);
+      closeScanner(); applyOCR(found, raw, base.toDataURL('image/jpeg', .8));
+    } else if (manual) toast('Noch nicht lesbar – näher ran, ruhig halten, Licht prüfen');
+  } catch (e) {} finally { scanBusy = false; }
+}
+function applyOCR(r, raw, previewSrc) {
+  if (previewSrc) { $('#cardPreview').src = previewSrc; $('#cardPreview').classList.remove('hidden'); }
+  $('#ocrRaw').textContent = 'Gelesen: ' + (raw || '').trim().slice(0, 400); $('#ocrRaw').classList.toggle('hidden', !(raw || '').trim());
+  if (r.code) $('#fSet').value = r.code;
+  if (r.n) $('#fNum').value = r.den ? `${parseInt(r.n, 10)}/${r.den}` : parseInt(r.n, 10);
+  cur._den = r.den;
+  if (r.n && (r.code || r.den)) doLookup();
+  else toast(r.n || r.code ? 'Bitte fehlende Angabe ergänzen' : 'Nummer nicht erkannt – bitte eintippen');
+}
+
+/* ---------- Cardmarket Sealed-Preisliste ---------- */
+let cmData = null;
+function idbOpen() { return new Promise((res, rej) => { const r = indexedDB.open('japanhaul', 1); r.onupgradeneeded = () => r.result.createObjectStore('kv'); r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error); }); }
+async function idbGet(k) { try { const db = await idbOpen(); return await new Promise(res => { const q = db.transaction('kv').objectStore('kv').get(k); q.onsuccess = () => res(q.result || null); q.onerror = () => res(null); }); } catch (e) { return null; } }
+async function idbSet(k, v) { try { const db = await idbOpen(); db.transaction('kv', 'readwrite').objectStore('kv').put(v, k); } catch (e) {} }
+function cmUrls() {
+  const u = [], h = location.hostname;
+  if (h.endsWith('.github.io')) {
+    const user = h.split('.')[0], repo = location.pathname.split('/').filter(Boolean)[0] || h;
+    u.push(`https://raw.githubusercontent.com/${user}/${repo}/main/cm-sealed.json?h=${Math.floor(Date.now() / 36e5)}`);
+  }
+  u.push('cm-sealed.json'); return u;
+}
+const fDate = d => String(d || '').slice(0, 10).split('-').reverse().join('.');
+function cmStatusText() {
+  const t = cmData ? `Stand ${fDate(cmData.date)} · ${cmData.p.length.toLocaleString('de-DE')} Produkte` : 'Preisliste nicht verfügbar – Einrichtung prüfen';
+  $('#cmStatus').textContent = t; $('#cmInfo').textContent = cmData ? '· Preise ' + fDate(cmData.date) : '';
+}
+let cmLoading = null;
+function loadCM(force) {
+  if (cmData && !force) return Promise.resolve(cmData);
+  if (cmLoading) return cmLoading;
+  cmLoading = (async () => {
+    let got = null;
+    for (const u of cmUrls()) { try { const j = await getJSON(u); if (j && Array.isArray(j.p)) { got = j; break; } } catch (e) {} }
+    if (got) { cmData = got; idbSet('cm', got); }
+    else if (!cmData) cmData = await idbGet('cm');
+    cmStatusText(); cmLoading = null; return cmData;
+  })();
+  return cmLoading;
+}
+const cmVal = p => settings.mktBase === 'low' ? (p[6] || p[4] || p[5] || null) : (p[4] || p[5] || p[6] || null);
+const norm2 = s => String(s).toLowerCase().replace(/[^a-z0-9äöüé]+/g, ' ').trim();
+function cmSearch(q) {
+  if (!cmData) return [];
+  const toks = norm2(q).split(' ').filter(Boolean); if (!toks.length) return [];
+  const res = [];
+  for (const p of cmData.p) { const nm = norm2(p[1]); if (toks.every(t => nm.includes(t))) { res.push(p); if (res.length > 500) break; } }
+  const rank = c => /display/i.test(c) ? 0 : /booster/i.test(c) ? 1 : 2;
+  return res.sort((a, b) => rank(a[2]) - rank(b[2]) || (cmVal(b) ? 1 : 0) - (cmVal(a) ? 1 : 0) || a[1].length - b[1].length).slice(0, 40);
+}
+async function renderCmResults() {
+  const q = $('#fCmSearch').value, box = $('#cmResults');
+  if (!q.trim()) { box.classList.add('hidden'); return; }
+  box.classList.remove('hidden');
+  if (!cmData) { box.innerHTML = '<div class="res">Preisliste lädt …</div>'; await loadCM(); if (!cmData) { box.innerHTML = '<div class="res">Preisliste nicht verfügbar. Namen einfach unten eintragen.</div>'; return; } }
+  const r = cmSearch($('#fCmSearch').value);
+  box.innerHTML = r.length ? r.map(p => `<button class="res" data-cm="${p[0]}"><span>${esc(p[1])}<div class="c">${esc(p[2])}</div></span><b>${cmVal(p) ? fE(cmVal(p)) : '–'}</b></button>`).join('')
+    : '<div class="res">Nichts gefunden – mit dem englischen Cardmarket-Namen probieren</div>';
+}
+function selectCm(id, keepMarket) {
+  const p = cmData && cmData.p.find(x => x[0] === id); if (!p) return false;
+  cur.cmId = id; $('#fSealedName').value = p[1]; $('#fCmSearch').value = ''; $('#cmResults').classList.add('hidden');
+  const r = R();
+  $('#cmSel').classList.remove('hidden');
+  $('#cmSel').innerHTML = `<div style="font-weight:700">${esc(p[1])}</div><div class="mut">${esc(p[2])} · Cardmarket</div>
+    <div class="prices"><div class="pbox"><div class="l">Niedrigster</div><div class="v">${p[6] ? fE(p[6]) : '–'}</div><div class="l">${p[6] ? fY(p[6] * r) : ''}</div></div>
+    <div class="pbox"><div class="l">Trend</div><div class="v">${p[4] ? fE(p[4]) : '–'}</div><div class="l">${p[4] ? fY(p[4] * r) : ''}</div></div></div>`;
+  if (!keepMarket) {
+    const v = cmVal(p);
+    if (v) { $('#fMarket').value = v.toFixed(2).replace('.', ','); cur.marketSrc = BASE_LBL(); $('#mktSrc').textContent = '· ' + BASE_LBL(); }
+    else { $('#fMarket').value = ''; cur.marketSrc = ''; $('#mktSrc').textContent = '· kein Cardmarket-Preis'; }
+  }
+  updateSealedLinks(); updateDeal(); return true;
+}
+async function applyJan(code, fromScan) {
+  const m = janMap[code]; if (!m) return false;
+  const e = typeof m === 'string' ? { name: m } : m;
+  if (e.uvp) $('#fUvp').value = e.uvp;
+  $('#fSealedName').value = e.name || '';
+  if (e.id) { await loadCM(); if (!selectCm(e.id)) $('#fSealedName').value = e.name || ''; }
+  if (fromScan) toast('Bekanntes Produkt ✓');
+  updateSealedLinks(); updateDeal(); return true;
 }
 
 /* ---------- Barcode ---------- */
@@ -395,24 +605,23 @@ async function thumb(file) {
 }
 
 /* ---------- Links ---------- */
-function shopLinks(jp, en, extra) {
-  const q = encodeURIComponent;
-  const L = [];
-  if (en) L.push(['Cardmarket', `https://www.cardmarket.com/de/Pokemon/Products/Search?searchString=${q(en)}`]);
-  if (jp) {
-    L.push(['SNKRDUNK', `https://snkrdunk.com/search?keywords=${q(jp + (extra ? ' ' + extra : ''))}`]);
-    L.push(['Mercari', `https://jp.mercari.com/search?keyword=${q(jp + (extra ? ' ' + extra : ''))}`]);
-    L.push(['Yuyu-tei', `https://yuyu-tei.jp/sell/poc/s/search?search_word=${q(jp)}`]);
-  }
-  return L.map(([n, u]) => `<a href="${u}" target="_blank" rel="noopener">${n} ↗</a>`).join('');
+// Cardmarket-Link: direkt aufs Produkt (per Produkt-ID), sonst Suche
+function cmHref(id, query) {
+  return id ? `https://www.cardmarket.com/de/Pokemon/Products?idProduct=${id}`
+            : `https://www.cardmarket.com/de/Pokemon/Products/Search?searchString=${encodeURIComponent(query || '')}`;
+}
+function cmLinkHtml(id, query) {
+  if (!id && !query) return '';
+  return `<a href="${cmHref(id, query)}" target="_blank" rel="noopener">Auf Cardmarket öffnen ↗</a>`;
 }
 
 /* ---------- Erfassen-Flows ---------- */
 function resetForm(kind) {
   editId = null; $('#btnCancelEdit').classList.add('hidden'); $('#btnSave').textContent = 'Speichern';
-  cur = { id: null, type: kind === 'sealed' ? 'Sealed' : 'Karte', set: '', setName: '', num: '', name: '', nameEn: '', jan: '', img: '', marketSrc: '' };
-  ['#fSet', '#fNum', '#fPrice', '#fMarket', '#fNote', '#fJan', '#fSealedName', '#fGrade'].forEach(s => $(s).value = '');
-  $('#fQty').value = 1; $('#fDate').value = today();
+  cur = { id: null, cmId: null, type: kind === 'sealed' ? 'Sealed' : 'Karte', set: '', setName: '', num: '', name: '', nameEn: '', jan: '', img: '', marketSrc: '' };
+  ['#fSet', '#fNum', '#fPrice', '#fMarket', '#fNote', '#fJan', '#fSealedName', '#fGrade', '#fUvp', '#fCmSearch'].forEach(s => $(s).value = '');
+  $('#cmSel').classList.add('hidden'); $('#cmResults').classList.add('hidden');
+  $('#fQty').value = 1; $('#fDate').value = today(); $('#fCond').value = 'NM';
   $('#cardResult').innerHTML = ''; $('#setCands').innerHTML = ''; $('#sealedLinks').innerHTML = ''; $('#mktSrc').textContent = '';
   $('#ocrRaw').classList.add('hidden'); $('#cardPreview').classList.add('hidden'); $('#sealedPreview').classList.add('hidden');
   $('#pCard').classList.toggle('hidden', kind === 'sealed'); $('#pSealed').classList.toggle('hidden', kind !== 'sealed');
@@ -422,6 +631,7 @@ function resetForm(kind) {
 function setType(t) {
   cur.type = t; $$('#segType button').forEach(b => b.classList.toggle('on', b.dataset.v === t));
   $('#gradeRow').classList.toggle('hidden', t !== 'Graded');
+  $('#condRow').classList.toggle('hidden', t !== 'Karte');
   if (t === 'Sealed' && $('#pSealed').classList.contains('hidden') && !cur.set) { $('#pSealed').classList.remove('hidden'); $('#pCard').classList.add('hidden'); }
 }
 async function doLookup() {
@@ -440,8 +650,10 @@ async function doLookup() {
     const { set, card } = await lookupCard(setId, n);
     cur.set = setId; cur.setName = set.name || setId; cur.num = card.localId; cur.name = card.name; cur.img = card.image ? card.image + '/low.webp' : '';
     cur.rarity = card.rarity || '';
+    const cmp = card.pricing && card.pricing.cardmarket;
+    cur.cmId = cmp && (cmp.idProduct || cmp.productId || cmp.id) || null;
     const pr = cmPrice(card);
-    if (pr) { $('#fMarket').value = pr.v.toFixed(2).replace('.', ','); cur.marketSrc = 'Cardmarket'; $('#mktSrc').textContent = '· Cardmarket-Trend'; }
+    if (pr) { $('#fMarket').value = pr.v.toFixed(2).replace('.', ','); cur.marketSrc = BASE_LBL(); $('#mktSrc').textContent = '· ' + BASE_LBL(); }
     else { cur.marketSrc = ''; $('#mktSrc').textContent = '· kein Cardmarket-Preis gefunden'; }
     renderCardResult(card, set, pr);
     englishName(card).then(en => { if (en) { cur.nameEn = en; renderCardResult(card, set, pr); } });
@@ -458,8 +670,8 @@ function renderCardResult(card, set, pr) {
   const r = R();
   const priceHtml = pr ? `
     <div class="prices">
-      <div class="pbox"><div class="l">Cardmarket-Trend</div><div class="v">${fE(pr.v)}</div><div class="l">${fY(pr.v * r)}</div></div>
-      <div class="pbox"><div class="l">${pr.avg30 ? 'Ø 30 Tage' : 'Ab-Preis'}</div><div class="v">${fE(pr.avg30 || pr.low || pr.v)}</div><div class="l">${fY((pr.avg30 || pr.low || pr.v) * r)}</div></div>
+      <div class="pbox"><div class="l">Niedrigster</div><div class="v">${pr.low ? fE(pr.low) : '–'}</div><div class="l">${pr.low ? fY(pr.low * r) : ''}</div></div>
+      <div class="pbox"><div class="l">Trend</div><div class="v">${pr.trend ? fE(pr.trend) : '–'}</div><div class="l">${pr.trend ? fY(pr.trend * r) : ''}</div></div>
     </div>` : `<p class="mut">Für diese Karte liefert die Datenbank keinen Marktpreis. Preis aus Collectr unten eintragen oder über die Links nachsehen.</p>`;
   $('#cardResult').innerHTML = `
     <div class="result" style="margin-top:12px">
@@ -471,14 +683,10 @@ function renderCardResult(card, set, pr) {
       </div>
     </div>
     ${priceHtml}
-    <div class="links">${shopLinks(card.name, cur.nameEn, cur.set + ' ' + card.localId)}</div>`;
+    <div class="links">${cmLinkHtml(cur.cmId, cur.nameEn || card.name)}</div>`;
 }
 function updateSealedLinks() {
-  const name = $('#fSealedName').value.trim(), jan = $('#fJan').value.trim();
-  const q = encodeURIComponent; const L = [];
-  if (name) { L.push(['Cardmarket', `https://www.cardmarket.com/de/Pokemon/Products/Search?searchString=${q(name)}`]); L.push(['SNKRDUNK', `https://snkrdunk.com/search?keywords=${q(name)}`]); }
-  if (jan || name) L.push(['Mercari', `https://jp.mercari.com/search?keyword=${q(jan || name)}`]);
-  $('#sealedLinks').innerHTML = L.map(([n, u]) => `<a href="${u}" target="_blank" rel="noopener">${n} ↗</a>`).join('');
+  $('#sealedLinks').innerHTML = cmLinkHtml(cur && cur.cmId, $('#fSealedName').value.trim());
 }
 
 /* ---------- Preis & Deal ---------- */
@@ -488,21 +696,25 @@ function priceCalc() {
   const r = R();
   return curCurrency === 'JPY' ? { jpy: p, eur: p / r } : { jpy: p * r, eur: p };
 }
+const fPct = x => { const p = Math.round(x * 100); return (p > 0 ? '+' : '') + p + ' %'; };
+const dealCls = q => q < .8 ? ['d-great', 'Sehr guter Deal'] : q < .95 ? ['d-good', 'Guter Deal'] : q <= 1.05 ? ['d-fair', 'Fairer Preis'] : ['d-bad', 'Über Marktpreis'];
 function updateDeal() {
   if (!$('#fPrice')) return;
   const pc = priceCalc(), mk = num($('#fMarket').value), qty = Math.max(1, parseInt($('#fQty').value, 10) || 1), r = R();
+  const uvp = cur && cur.type === 'Sealed' ? num($('#fUvp').value) : null;
   $('#priceConv').textContent = pc ? (curCurrency === 'JPY' ? `≈ ${fE(pc.eur)}` : `≈ ${fY(pc.jpy)}`) + (qty > 1 ? ` · pro Stück ${fY(pc.jpy / qty)} / ${fE(pc.eur / qty)}` : '') : '';
   const box = $('#dealBox');
   if (!pc) { box.className = 'deal d-none'; box.innerHTML = mk ? `Marktpreis: ${fE(mk)} · ${fY(mk * r)}<small>Kaufpreis eingeben für Deal-Check</small>` : 'Preis eingeben für Deal-Check'; return; }
-  if (!mk) { box.className = 'deal d-none'; box.innerHTML = 'Kein Marktpreis zum Vergleich'; return; }
-  const unit = pc.eur / qty, ratio = unit / mk, pct = Math.round((ratio - 1) * 100);
-  let cls, txt;
-  if (ratio < .8) { cls = 'd-great'; txt = 'Sehr guter Deal'; }
-  else if (ratio < .95) { cls = 'd-good'; txt = 'Guter Deal'; }
-  else if (ratio <= 1.05) { cls = 'd-fair'; txt = 'Fairer Preis'; }
-  else { cls = 'd-bad'; txt = 'Über Marktpreis'; }
+  const unit = pc.eur / qty, unitY = pc.jpy / qty;
+  const uvpLine = uvp ? `<small>ggü. UVP ${fY(uvp)}: ${fPct(unitY / uvp - 1)}</small>` : '';
+  if (!mk) {
+    if (uvp) { const q = unitY / uvp; box.className = 'deal ' + dealCls(q)[0]; box.innerHTML = `${q <= 1.001 ? 'Auf/unter UVP' : 'Über UVP'}: ${fPct(q - 1)}<small>Kein Marktpreis zum Vergleich</small>`; }
+    else { box.className = 'deal d-none'; box.innerHTML = 'Kein Marktpreis zum Vergleich'; }
+    return;
+  }
+  const [cls, txt] = dealCls(unit / mk);
   box.className = 'deal ' + cls;
-  box.innerHTML = `${txt}: ${pct > 0 ? '+' : ''}${pct} %<small>Du zahlst ${fE(unit)} (${fY(unit * r)}) · Markt ${fE(mk)} (${fY(mk * r)})</small>`;
+  box.innerHTML = `${txt}: ${fPct(unit / mk - 1)}<small>Du zahlst ${fE(unit)} (${fY(unitY)}) · Markt ${fE(mk)} (${fY(mk * r)})</small>${uvpLine}`;
 }
 function dealTag(i) {
   if (!i.marketEUR || !i.priceEUR) return '';
@@ -519,7 +731,8 @@ function saveCurrent() {
   if (isSealed) {
     cur.name = $('#fSealedName').value.trim(); cur.jan = $('#fJan').value.trim();
     if (!cur.name && !cur.jan) { toast('Bitte Produktname oder Barcode angeben'); return; }
-    if (cur.jan && cur.name) { janMap[cur.jan] = cur.name; LS.set('jh_jan', janMap); }
+    cur.uvp = num($('#fUvp').value);
+    if (cur.jan) { janMap[cur.jan] = { id: cur.cmId || null, name: cur.name, uvp: cur.uvp || null }; LS.set('jh_jan', janMap); }
     if (cur.type !== 'Sealed') cur.type = 'Sealed';
   } else {
     if (!cur.name) { cur.set = $('#fSet').value.trim(); cur.num = $('#fNum').value.trim(); cur.name = cur.set && cur.num ? `${cur.set} ${cur.num}` : ''; }
@@ -531,9 +744,11 @@ function saveCurrent() {
     id: editId || uid(), date: $('#fDate').value || today(), type: cur.type,
     set: isSealed ? '' : cur.set, setName: isSealed ? '' : cur.setName, num: isSealed ? '' : cur.num,
     name: cur.name, nameEn: cur.nameEn || '', jan: isSealed ? cur.jan : '', rarity: cur.rarity || '',
+    cond: cur.type === 'Karte' ? $('#fCond').value : (cur.type === 'Sealed' ? 'versiegelt' : ''),
     grade: cur.type === 'Graded' ? `${$('#fGrader').value} ${$('#fGrade').value}`.trim() : '',
     qty, priceJPY: Math.round(pc.jpy), priceEUR: Math.round(pc.eur * 100) / 100, rate: R(),
     marketEUR: mk, marketSrc: mk ? (cur.marketSrc || 'manuell') : '',
+    cmId: cur.cmId || null, uvp: isSealed ? (cur.uvp || null) : null,
     img: cur.img || '', note: $('#fNote').value.trim(), created: Date.now()
   };
   if (editId) { const ix = items.findIndex(x => x.id === editId); if (ix >= 0) { it.created = items[ix].created; items[ix] = it; } }
@@ -550,11 +765,16 @@ function editItem(id) {
   const sealed = i.type === 'Sealed';
   resetForm(sealed ? 'sealed' : 'card');
   editId = id; cur = Object.assign({}, i); setType(i.type);
-  if (sealed) { $('#fSealedName').value = i.name; $('#fJan').value = i.jan || ''; updateSealedLinks(); }
+  if (sealed) {
+    $('#fSealedName').value = i.name; $('#fJan').value = i.jan || ''; $('#fUvp').value = i.uvp || '';
+    if (i.cmId) loadCM().then(() => { selectCm(i.cmId, true); $('#fSealedName').value = i.name; });
+    updateSealedLinks();
+  }
   else {
     $('#fSet').value = i.set; $('#fNum').value = i.num;
     $('#cardResult').innerHTML = `<div class="result" style="margin-top:12px">${i.img ? `<img src="${esc(i.img)}" alt="">` : ''}<div><div class="name">${esc(i.name)}</div><div class="mut">${esc(i.setName)} · ${esc(i.set)} ${esc(i.num)}</div></div></div>`;
   }
+  if (i.cond && i.type === 'Karte') $('#fCond').value = i.cond;
   if (i.grade) { const [g, ...r] = i.grade.split(' '); $('#fGrader').value = g; $('#fGrade').value = r.join(' '); }
   curCurrency = 'JPY'; $$('#segCur button').forEach(b => b.classList.toggle('on', b.dataset.v === 'JPY'));
   $('#fPrice').value = i.priceJPY; $('#fQty').value = i.qty; $('#fDate').value = i.date;
@@ -579,7 +799,7 @@ function renderList() {
       ${i.img ? `<img src="${esc(i.img)}" alt="" loading="lazy">` : `<div class="ph">${i.type === 'Sealed' ? '📦' : '🃏'}</div>`}
       <div class="body">
         <div class="t">${esc(i.name)}${i.qty > 1 ? ` ×${i.qty}` : ''}</div>
-        <div class="s">${esc(i.type)}${i.grade ? ' · ' + esc(i.grade) : ''}${i.set ? ' · ' + esc(i.set) + ' ' + esc(i.num) : ''} · ${i.date.split('-').reverse().join('.')}</div>
+        <div class="s">${esc(i.type)}${i.cond && i.type === 'Karte' ? ' · ' + esc(i.cond) : ''}${i.grade ? ' · ' + esc(i.grade) : ''}${i.set ? ' · ' + esc(i.set) + ' ' + esc(i.num) : ''} · ${i.date.split('-').reverse().join('.')}</div>
         <div class="p">${fY(i.priceJPY)} <span class="mut">(${fE(i.priceEUR)})</span>${dealTag(i)}</div>
         ${i.marketEUR ? `<div class="s">Markt: ${fE(i.marketEUR)} / Stk.</div>` : ''}
         ${i.note ? `<div class="s">${esc(i.note)}</div>` : ''}
@@ -594,11 +814,11 @@ function rows() {
     const unit = i.priceEUR / i.qty;
     return {
       'Kaufdatum': i.date, 'Typ': i.type, 'Name': i.name, 'Name (EN)': i.nameEn || '', 'Set': i.set || '', 'Set-Name': i.setName || '', 'Nummer': i.num || '',
-      'Seltenheit': i.rarity || '', 'Grading': i.grade || '', 'Barcode (JAN)': i.jan || '', 'Menge': i.qty,
+      'Seltenheit': i.rarity || '', 'Zustand': i.cond || '', 'Grading': i.grade || '', 'Barcode (JAN)': i.jan || '', 'UVP ¥': i.uvp || '', 'Menge': i.qty,
       'Kaufpreis ¥': i.priceJPY, 'Kaufpreis €': i.priceEUR, 'Kurs (1 € = ¥)': Math.round(i.rate * 100) / 100,
       'Marktpreis €/Stk.': i.marketEUR || '', 'Marktpreis ¥/Stk.': i.marketEUR ? Math.round(i.marketEUR * i.rate) : '',
       'Abweichung zum Markt %': i.marketEUR ? Math.round((unit / i.marketEUR - 1) * 1000) / 10 : '',
-      'Quelle Marktpreis': i.marketSrc || '', 'Notiz': i.note || ''
+      'Quelle Marktpreis': i.marketSrc || '', 'Cardmarket-ID': i.cmId || '', 'Notiz': i.note || ''
     };
   });
 }
@@ -658,22 +878,25 @@ function showTab(id) {
 
 /* ---------- Events ---------- */
 $$('nav button').forEach(b => b.onclick = () => showTab(b.dataset.tab));
-$('#btnPhoto').onclick = () => { $('#inPhoto').value = ''; $('#inPhoto').click(); };
-$('#btnBarcode').onclick = () => { $('#inBarcode').value = ''; $('#inBarcode').click(); };
+$('#btnPhoto').onclick = openScanner;
+$('#scanCancel').onclick = closeScanner;
+$('#scanShot').onclick = () => scanFrame(true);
+$('#scanManual').onclick = () => { closeScanner(); $('#fSet').focus(); };
+$('#btnBarcode').onclick = () => { resetForm('sealed'); setType('Sealed'); $('#inBarcode').value = ''; $('#inBarcode').click(); loadCM(); };
+$('#btnBarcode2').onclick = () => { $('#inBarcode').value = ''; $('#inBarcode').click(); };
+$('#fCmSearch').oninput = renderCmResults;
+$('#cmResults').onclick = e => { const b = e.target.closest('[data-cm]'); if (b) selectCm(+b.dataset.cm); };
+$('#fUvp').addEventListener('input', updateDeal);
+$('#btnCmReload').onclick = async () => { $('#cmStatus').textContent = 'Lade …'; await loadCM(true); toast(cmData ? 'Preisliste aktuell ✓' : 'Preisliste nicht gefunden'); };
 $('#btnManual').onclick = () => { resetForm('card'); getSets().catch(() => {}); $('#fSet').focus(); };
 $('#inPhoto').onchange = async e => {
   const f = e.target.files[0]; if (!f) return;
   resetForm('card'); getSets().catch(() => {});
   const r = await runOCR(f);
-  if (r.code) $('#fSet').value = r.code;
-  if (r.n) $('#fNum').value = r.den ? `${parseInt(r.n, 10)}/${r.den}` : parseInt(r.n, 10);
-  cur._den = r.den;
-  if (r.n && (r.code || r.den)) doLookup();
-  else toast(r.n || r.code ? 'Bitte fehlende Angabe ergänzen' : 'Nummer nicht erkannt – bitte eintippen');
+  applyOCR(r.found, r.raw, r.preview);
 };
 $('#inBarcode').onchange = async e => {
   const f = e.target.files[0]; if (!f) return;
-  resetForm('sealed'); setType('Sealed');
   $('#bcBusy').classList.remove('hidden');
   let code = null;
   try { code = await readBarcode(f); } catch (err) {}
@@ -681,12 +904,11 @@ $('#inBarcode').onchange = async e => {
   try { cur.img = await thumb(f); } catch (err) {}
   if (code) {
     $('#fJan').value = code;
-    if (janMap[code]) { $('#fSealedName').value = janMap[code]; toast('Bekanntes Produkt ✓'); }
-    else { toast('Barcode erkannt – Name einmal eintragen'); $('#fSealedName').focus(); }
+    if (!(await applyJan(code, true))) { toast('Neuer Barcode – Produkt einmal suchen'); $('#fCmSearch').focus(); }
   } else toast('Barcode nicht erkannt – bitte näher ran oder eintippen');
   updateSealedLinks();
 };
-$('#fJan').oninput = () => { const j = $('#fJan').value.trim(); if (janMap[j] && !$('#fSealedName').value) $('#fSealedName').value = janMap[j]; updateSealedLinks(); };
+$('#fJan').onchange = () => { const j = $('#fJan').value.trim(); if (janMap[j]) applyJan(j, true); updateSealedLinks(); };
 $('#fSealedName').oninput = updateSealedLinks;
 $('#btnLookup').onclick = doLookup;
 $('#fNum').onkeydown = e => { if (e.key === 'Enter') doLookup(); };
@@ -701,7 +923,7 @@ $('#segCur').onclick = e => {
 };
 ['#fPrice', '#fMarket', '#fQty'].forEach(s => $(s).addEventListener('input', updateDeal));
 $('#fMarket').addEventListener('focus', () => { if (cur) cur._mk0 = $('#fMarket').value; });
-$('#fMarket').addEventListener('input', () => { if (cur && cur.marketSrc === 'Cardmarket') { cur.marketSrc = 'manuell'; $('#mktSrc').textContent = '· manuell'; } });
+$('#fMarket').addEventListener('input', () => { if (cur && /^Cardmarket/.test(cur.marketSrc)) { cur.marketSrc = 'manuell'; $('#mktSrc').textContent = '· manuell'; } });
 $('#btnSave').onclick = saveCurrent;
 $('#btnCancelEdit').onclick = () => { editId = null; cur = null; $('#pCard').classList.add('hidden'); $('#pSealed').classList.add('hidden'); $('#pBuy').classList.add('hidden'); $('#hint').classList.remove('hidden'); showTab('tabList'); };
 $('#list').onclick = e => {
@@ -715,10 +937,12 @@ $('#btnCsv').onclick = exportCsv; $('#btnBackup').onclick = backup;
 $('#btnRestore').onclick = () => $('#inRestore').click();
 $('#inRestore').onchange = e => { const f = e.target.files[0]; if (f) restore(f); };
 $('#btnRateSave').onclick = () => { settings.rateOverride = num($('#fRateOv').value); LS.set('jh_settings', settings); renderRate(); toast('Kurs übernommen'); };
+$('#fMktBase').value = settings.mktBase;
+$('#fMktBase').onchange = () => { settings.mktBase = $('#fMktBase').value; LS.set('jh_settings', settings); toast('Gilt ab der nächsten Suche'); };
 $('#btnRateReload').onclick = async () => { await loadRate(); toast('Kurs aktualisiert'); };
 $('#btnWarm').onclick = async () => {
   toast('Lade Erkennung …');
-  try { await Promise.all([getWorker(), getSets(), loadScript('https://unpkg.com/@zxing/library@0.21.3/umd/index.min.js'), loadScript('https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js')]); toast('Alles bereit ✓'); }
+  try { await Promise.all([getWorker(), getSets(), loadCM(true), loadScript('https://unpkg.com/@zxing/library@0.21.3/umd/index.min.js'), loadScript('https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js')]); toast('Alles bereit ✓'); }
   catch (e) { toast('Laden fehlgeschlagen – Internet prüfen'); }
 };
 $('#btnWipe').onclick = () => { if (confirm('Wirklich ALLE Einträge löschen? Vorher Backup machen!') && confirm('Sicher?')) { items = []; saveItems(); renderList(); toast('Gelöscht'); } };
@@ -726,6 +950,7 @@ $('#btnWipe').onclick = () => { if (confirm('Wirklich ALLE Einträge löschen? V
 /* ---------- Start ---------- */
 fillSetList(); renderRate(); renderList(); loadRate();
 getSets().catch(() => {});
+idbGet('cm').then(d => { if (d && !cmData) cmData = d; cmStatusText(); loadCM(true); });
 </script>
 </body>
 </html>
