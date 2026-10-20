@@ -79,6 +79,12 @@ nav{position:fixed;left:0;right:0;bottom:0;display:flex;background:rgba(20,22,28
 nav button{flex:1;background:none;border:0;color:var(--mut);padding:6px;font-size:12px;font-weight:600;display:flex;flex-direction:column;align-items:center;gap:2px}
 nav button span{font-size:22px}
 nav button.on{color:var(--acc2)}
+.sheetBg{position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:20;display:flex;align-items:flex-end;justify-content:center}
+.sheet{background:var(--card);border:1px solid var(--line);border-bottom:0;border-radius:18px 18px 0 0;width:100%;max-width:560px;max-height:88vh;overflow-y:auto;padding:16px 16px calc(env(safe-area-inset-bottom) + 16px);-webkit-overflow-scrolling:touch}
+.sheet .bar{display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:12px}
+.sheet .x{background:var(--card2);border:1px solid var(--line);color:var(--text);border-radius:999px;width:36px;height:36px;font-size:18px;line-height:1;flex:0 0 auto}
+.kv{display:grid;grid-template-columns:auto 1fr;gap:6px 12px;font-size:14px;margin-top:12px}
+.kv div:nth-child(odd){color:var(--mut)}
 .toast{position:fixed;left:50%;bottom:calc(env(safe-area-inset-bottom) + 90px);transform:translateX(-50%);background:#000;color:#fff;padding:10px 16px;border-radius:999px;font-size:14px;opacity:0;transition:opacity .25s;pointer-events:none;z-index:9;max-width:90vw;text-align:center}
 .toast.show{opacity:1}
 .busy{display:flex;align-items:center;gap:10px;color:var(--mut);font-size:14px;margin-top:10px}
@@ -177,6 +183,7 @@ nav button.on{color:var(--acc2)}
     <label>Notiz</label>
     <input id="fNote" placeholder="optional">
     <button class="btn pri full" id="btnSave">Speichern</button>
+    <button class="btn full hidden" id="btnCancel">Abbrechen</button>
     <button class="btn full danger hidden" id="btnDelete">Eintrag löschen</button>
   </div>
 </section>
@@ -223,6 +230,16 @@ nav button.on{color:var(--acc2)}
   <button data-tab="tabList"><span>☰</span>Liste</button>
   <button data-tab="tabSet"><span>⚙︎</span>Einstellungen</button>
 </nav>
+<div class="sheetBg hidden" id="prevBg">
+  <div class="sheet" id="prevSheet">
+    <div class="bar"><h2 style="margin:0" id="prevTitle">Eintrag</h2><button class="x" id="prevClose" aria-label="Schließen">✕</button></div>
+    <div id="prevBody"></div>
+    <div class="row" style="margin-top:14px">
+      <div><button class="btn full" id="prevCloseBtn" style="margin-top:0">Schließen</button></div>
+      <div><button class="btn pri full" id="prevEdit" style="margin-top:0">Bearbeiten</button></div>
+    </div>
+  </div>
+</div>
 <div class="toast" id="toast"></div>
 
 <script>
@@ -470,22 +487,55 @@ function loadCM(force) {
   return cmLoading;
 }
 const norm2 = s => String(s).toLowerCase().replace(/[^a-z0-9äöüé]+/g, ' ').trim();
+// Deutsche Begriffe → Cardmarket (englisch)
+const SYN = [
+  [/top[\s-]*trainer[\s-]*box(en)?|\bttb\b/g, 'elite trainer box'], [/\bdisplays?\b/g, 'booster box'], [/\bdosen?\b/g, 'tin'],
+  [/kollektion(en)?/g, 'collection'], [/themendecks?/g, 'theme deck'], [/sammelbox(en)?|spezialkollektion/g, 'box'],
+  [/boosterpack(s)?/g, 'booster'], [/premium[\s-]*kollektion/g, 'premium collection'], [/\bbundles?\b/g, 'bundle']
+];
+let setPairs = null;
+async function getSetPairs() {
+  if (setPairs) return setPairs;
+  try {
+    const [de, en] = await Promise.all([getSets('de'), getSets('en')]);
+    const enById = Object.fromEntries(en.map(x => [x.id, x.name]));
+    setPairs = de.filter(x => enById[x.id] && norm2(x.name) !== norm2(enById[x.id])).map(x => [norm2(x.name), norm2(enById[x.id]), x.name, enById[x.id]]);
+  } catch (e) { setPairs = []; }
+  return setPairs;
+}
+function expandQueries(q) {
+  let base = norm2(q); SYN.forEach(([re, to]) => base = base.replace(re, to));
+  const out = [{ q: base, hint: '' }];
+  for (const [dn, en, deName, enName] of (setPairs || [])) {
+    if (!dn) continue;
+    if (base.includes(dn)) out.push({ q: base.replace(dn, en), hint: `${deName} = ${enName}` });
+    else if (base.length >= 3 && dn.startsWith(base.split(' ')[0]) && base.split(' ').length === 1) out.push({ q: en, hint: `${deName} = ${enName}` });
+  }
+  return out.slice(0, 12);
+}
 function cmSearch(q) {
-  const toks = norm2(q).split(' ').filter(Boolean); if (!toks.length || !cmData) return [];
-  const res = [];
-  for (const p of cmData.p) { const nm = norm2(p[1]); if (toks.every(t => nm.includes(t))) res.push(p); if (res.length > 400) break; }
-  const rank = c => /display/i.test(c) ? 0 : /booster/i.test(c) ? 1 : 2;
-  return res.sort((a, b) => rank(a[2]) - rank(b[2]) || a[1].length - b[1].length).slice(0, 25);
+  if (!cmData) return [];
+  const seen = new Set(), res = [];
+  for (const { q: qq, hint } of expandQueries(q)) {
+    const toks = qq.split(' ').filter(Boolean); if (!toks.length) continue;
+    for (const p of cmData.p) {
+      if (seen.has(p[0])) continue;
+      const nm = norm2(p[1]);
+      if (toks.every(t => nm.includes(t))) { seen.add(p[0]); res.push({ p, hint }); if (res.length > 400) break; }
+    }
+  }
+  const rank = c => /display|booster box/i.test(c) ? 0 : /booster/i.test(c) ? 1 : 2;
+  return res.sort((a, b) => rank(a.p[2]) - rank(b.p[2]) || a.p[1].length - b.p[1].length).slice(0, 30);
 }
 async function renderSugg() {
   const q = $('#fSealedQ').value, box = $('#sugg');
   if (!q.trim()) { box.classList.add('hidden'); return; }
   box.classList.remove('hidden');
-  if (!cmData) { box.innerHTML = '<div class="sug">Liste lädt …</div>'; await loadCM(); }
+  if (!cmData || !setPairs) { if (!cmData) box.innerHTML = '<div class="sug">Liste lädt …</div>'; await Promise.all([loadCM(), getSetPairs()]); }
   if (!cmData) { box.innerHTML = '<div class="sug">Produktliste nicht verfügbar – Name bleibt so stehen, Link sucht auf Cardmarket.</div>'; return; }
   const r = cmSearch($('#fSealedQ').value);
-  box.innerHTML = r.length ? r.map(p => `<button class="sug" data-cm="${p[0]}"><span>${esc(p[1])}<div class="c">${esc(p[2])}</div></span><b>${p[7] ? String(p[7]).slice(0, 4) : ''}</b></button>`).join('')
-    : '<div class="sug">Nichts gefunden – mit englischem Namen probieren</div>';
+  box.innerHTML = r.length ? r.map(({ p, hint }) => `<button class="sug" data-cm="${p[0]}"><span>${esc(p[1])}<div class="c">${esc(p[2])}${hint ? ' · ' + esc(hint) : ''}</div></span><b>${p[7] ? String(p[7]).slice(0, 4) : ''}</b></button>`).join('')
+    : '<div class="sug">Nichts gefunden – Cardmarket nutzt englische Namen, z. B. „Journey Together Booster Box“</div>';
 }
 function selectSealed(id) {
   const p = cmData && cmData.p.find(x => x[0] === id); if (!p) return;
@@ -530,7 +580,7 @@ function newForm() {
   $('#fCond').value = 'NM'; $('#fSealedCond').value = 'Versiegelt'; $('#fQty').value = 1; $('#fDate').value = today();
   $('#setCands').innerHTML = ''; $('#sugg').classList.add('hidden');
   setCur('JPY', true); showPhoto(null); renderCardInfo(); renderSealedInfo();
-  $('#formTitle').textContent = 'Neuer Eintrag'; $('#btnNew').classList.add('hidden'); $('#btnDelete').classList.add('hidden');
+  $('#formTitle').textContent = 'Neuer Eintrag'; $('#btnNew').classList.add('hidden'); $('#btnDelete').classList.add('hidden'); $('#btnCancel').classList.add('hidden');
   $('#btnSave').textContent = 'Speichern';
   setType('Karte');
 }
@@ -596,7 +646,7 @@ async function save() {
   if (F.photo && F.photoChanged) await idbSet('photos', it.id, F.photo);
   settings.lang = it.lang; settings.place = it.place; LS.set('jh_settings', settings);
   if (old) items[items.indexOf(old)] = it; else items.unshift(it);
-  if (saveItems()) { clearDraft(); toast(old ? 'Änderung gespeichert ✓' : 'Gespeichert ✓'); newForm(); renderList(); window.scrollTo(0, 0); }
+  if (saveItems()) { clearDraft(); toast(old ? 'Änderung gespeichert ✓' : 'Gespeichert ✓'); newForm(); renderList(); if (old) { showTab('tabList'); showPreview(old.id); } else window.scrollTo(0, 0); }
 }
 async function openItem(id) {
   const i = items.find(x => x.id === id); if (!i) return;
@@ -621,7 +671,7 @@ async function openItem(id) {
   if (i.hasPhoto) { const p = await idbGet('photos', i.id); if (p) { F.photo = p; showPhoto(p); } else if (i.thumb) showPhoto(i.thumb); }
   else if (i.thumb) showPhoto(i.thumb);
   $('#formTitle').textContent = 'Eintrag vom ' + fDate(i.date);
-  $('#btnNew').classList.remove('hidden'); $('#btnDelete').classList.remove('hidden'); $('#btnSave').textContent = 'Änderungen speichern';
+  $('#btnNew').classList.remove('hidden'); $('#btnDelete').classList.remove('hidden'); $('#btnCancel').classList.remove('hidden'); $('#btnSave').textContent = 'Änderungen speichern';
   offerLow(); updateDeal(); showTab('tabAdd');
 }
 function del() {
@@ -629,6 +679,40 @@ function del() {
   items = items.filter(x => x.id !== editId); idbDel('photos', editId); saveItems();
   clearDraft(); toast('Gelöscht'); newForm(); renderList(); showTab('tabList');
 }
+
+/* ---------- Vorschau ---------- */
+let prevId = null;
+async function showPreview(id) {
+  const i = items.find(x => x.id === id); if (!i) return;
+  prevId = id;
+  const r = i.rate || R(), q = i.qty || 1;
+  const code = i.code || (i.set ? `${i.abbr && i.abbr !== '-' ? i.abbr : i.set} ${i.num}${i.den ? '/' + i.den : ''}` : '');
+  const rows = [
+    ['Sprache', LANG_LBL[i.lang] || 'JP'], ['Typ', i.type],
+    ['Set', i.setName], ['Code', code], ['Erschienen', i.setDate ? fDate(i.setDate) : ''], ['Kategorie', i.cat],
+    ['Seltenheit', i.rarity], ['Illustration', i.illus], ['Zustand', i.cond], ['Grading', i.grade],
+    ['Menge', q > 1 ? q : ''], ['Gekauft am', fDate(i.date)], ['Kaufort', i.place],
+    ['Preis vor Ort', `${fY(i.priceJPY)} · ${fE(i.priceEUR)}${q > 1 ? ` (${fE(i.priceEUR / q)}/Stk.)` : ''}`],
+    ['Cardmarket', i.marketEUR ? `${fE(i.marketEUR)} · ${fY(i.marketEUR * r)} /Stk.` : ''],
+    ['Kurs', `1 € = ${Math.round(r * 100) / 100} ¥`], ['Notiz', i.note]
+  ].filter(x => x[1] !== '' && x[1] != null);
+  let deal = '';
+  if (i.marketEUR && i.priceEUR) { const k = (i.priceEUR / q) / i.marketEUR, [cls, txt] = dealCls(k); deal = `<div class="deal ${cls}">${txt}: ${fPct(k - 1)}</div>`; }
+  const pic = i.thumb || i.img;
+  $('#prevTitle').textContent = i.name + (i.nameEn ? ` (${i.nameEn})` : '');
+  $('#prevBody').innerHTML = `${pic ? `<img class="photo" id="prevPhoto" src="${esc(pic)}" alt="">` : ''}
+    ${i.img && (i.thumb || i.hasPhoto) ? `<div class="info"><img src="${esc(i.img)}" alt=""><div class="mut" style="align-self:center">Kartenbild aus der Datenbank</div></div>` : ''}
+    ${deal}
+    <div class="kv">${rows.map(([k, v]) => `<div>${esc(k)}</div><div>${esc(v)}</div>`).join('')}</div>
+    ${cmButton(i.cmId, i.nameEn || i.name)}`;
+  $('#prevBg').classList.remove('hidden'); $('#prevSheet').scrollTop = 0;
+  document.body.style.overflow = 'hidden';
+  if (i.hasPhoto) { const p = await idbGet('photos', i.id); if (p && prevId === id && $('#prevPhoto')) $('#prevPhoto').src = p; }
+}
+function closePreview() { prevId = null; $('#prevBg').classList.add('hidden'); document.body.style.overflow = ''; }
+$('#prevBg').addEventListener('click', e => { if (e.target === $('#prevBg')) closePreview(); });
+$('#prevClose').onclick = $('#prevCloseBtn').onclick = closePreview;
+$('#prevEdit').onclick = () => { const id = prevId; closePreview(); openItem(id); };
 
 /* ---------- Liste ---------- */
 function dealTag(i) {
@@ -725,7 +809,7 @@ function showTab(id) {
 }
 
 /* ---------- Events ---------- */
-$$('nav button').forEach(b => b.onclick = () => showTab(b.dataset.tab));
+$$('nav button').forEach(b => b.onclick = () => { if (b.dataset.tab === 'tabAdd' && editId) { clearDraft(); newForm(); } showTab(b.dataset.tab); });
 $('#segType').onclick = e => { const b = e.target.closest('button'); if (b) { setType(b.dataset.v); saveDraft(); } };
 $('#segCur').onclick = e => { const b = e.target.closest('button'); if (b) setCur(b.dataset.v); };
 $('#btnPhoto').onclick = $('#btnPhotoAgain').onclick = () => { $('#inPhoto').value = ''; $('#inPhoto').click(); };
@@ -739,14 +823,15 @@ $('#fCode').addEventListener('keydown', e => { if (e.key === 'Enter') { e.preven
 $('#setCands').onclick = e => { const b = e.target.closest('[data-id]'); if (b) doLookup(b.dataset.id); };
 let suggT;
 $('#fSealedQ').addEventListener('input', () => { F.sealed = null; renderSealedInfo(); offerLow(); clearTimeout(suggT); suggT = setTimeout(renderSugg, 200); });
-$('#fSealedQ').addEventListener('focus', () => { if ($('#fSealedQ').value.trim() && !F.sealed) renderSugg(); });
+$('#fSealedQ').addEventListener('focus', () => { getSetPairs(); if ($('#fSealedQ').value.trim() && !F.sealed) renderSugg(); });
 $('#sugg').onclick = e => { const b = e.target.closest('[data-cm]'); if (b) selectSealed(+b.dataset.cm); };
 $('#btnTakeLow').onclick = () => { const s = F.type === 'Sealed' ? F.sealed : F.card; if (s && s.low) { $('#fMarket').value = fNumIn(s.low); updateDeal(); } };
 ['#fPrice', '#fMarket', '#fQty'].forEach(s => $(s).addEventListener('input', updateDeal));
 $('#btnSave').onclick = save;
 $('#btnDelete').onclick = del;
+$('#btnCancel').onclick = () => { const id = editId; clearDraft(); newForm(); showTab('tabList'); if (id) showPreview(id); };
 $('#btnNew').onclick = () => { clearDraft(); newForm(); window.scrollTo(0, 0); };
-$('#list').onclick = e => { const b = e.target.closest('.item'); if (b) openItem(b.dataset.id); };
+$('#list').onclick = e => { const b = e.target.closest('.item'); if (b) showPreview(b.dataset.id); };
 $('#fSearch').oninput = renderList;
 $('#btnExport').onclick = $('#btnExport2').onclick = exportXlsx;
 $('#btnCsv').onclick = exportCsv; $('#btnBackup').onclick = backup;
