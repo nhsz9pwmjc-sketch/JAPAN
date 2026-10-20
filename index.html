@@ -113,11 +113,15 @@ nav button.on{color:var(--acc2)}
   </div>
   <input type="file" id="inPhoto" accept="image/*" capture="environment" class="hidden">
   <input type="file" id="inBarcode" accept="image/*" capture="environment" class="hidden">
-  <p class="mut" id="hint">Tipp Karte: Kamera nah an die Karte halten, sodass Set-Kürzel und Nummer (unten links) im gelben Rahmen liegen. Die App liest automatisch.</p>
+  <p class="mut" id="hint">Tipp Karte: Set-Kürzel und Nummer mit der iPhone-Funktion „Text scannen“ ins Feld holen – das liest auch die kursive Mega-Schrift zuverlässig.</p>
 
   <!-- Karte -->
   <div class="box hidden" id="pCard">
-    <img class="preview hidden" id="cardPreview" alt="">
+    <label>Set-Kürzel + Nummer scannen</label>
+    <input id="fQuick" placeholder="Feld antippen → „Text scannen“" autocomplete="off" autocorrect="off" autocapitalize="characters" spellcheck="false" style="font-size:18px;border-color:var(--acc2)">
+    <div class="mut" style="margin-top:6px">Ins Feld tippen, dann in der Tastaturleiste das Scan-Symbol <b>⌗</b> (oder lange drücken → „Text scannen“). Kamera auf „M5 092/081“ unten links halten, „Einsetzen“ tippen – die Suche startet automatisch.</div>
+    <button class="btn full" id="btnLiveScan" style="margin-top:10px">Alternativ: App-Kamera (Beta)</button>
+    <img class="preview hidden" id="cardPreview" alt="" style="margin-top:10px">
     <div class="busy hidden" id="ocrBusy"><div class="spin"></div><span id="ocrMsg">Lese Kartennummer …</span></div>
     <div class="row">
       <div><label>Set-Kürzel</label><input id="fSet" list="setList" placeholder="z. B. SV2a" autocapitalize="characters" autocomplete="off"></div>
@@ -177,6 +181,7 @@ nav button.on{color:var(--acc2)}
     </div>
     <label>Marktpreis pro Stück in € <span id="mktSrc"></span></label>
     <input id="fMarket" inputmode="decimal" placeholder="z. B. aus Collectr übernehmen">
+    <div class="mut" style="margin-top:4px">Für den echten japanischen DE-Preis: Cardmarket-Link öffnen, obersten Preis hier eintragen.</div>
     <div class="deal d-none" id="dealBox">Preis eingeben für Deal-Check</div>
     <label>Notiz</label>
     <input id="fNote" placeholder="optional, z. B. Laden oder Zustand">
@@ -285,7 +290,7 @@ async function getJSON(url) { const r = await fetch(url); if (!r.ok) throw new E
 /* ---------- Zustand ---------- */
 let items = LS.get('jh_items', []);
 let settings = Object.assign({ rateOverride: null, mktBase: 'low' }, LS.get('jh_settings', {}));
-const BASE_LBL = () => settings.mktBase === 'low' ? 'Cardmarket-Tiefstpreis' : 'Cardmarket-Trend';
+const BASE_LBL = () => settings.mktBase === 'low' ? 'Cardmarket-Tiefstpreis, alle Sprachen' : 'Cardmarket-Trend, alle Sprachen';
 let rate = LS.get('jh_rate', null);
 let janMap = LS.get('jh_jan', {});
 let setsCache = LS.get('jh_sets', null);
@@ -332,7 +337,7 @@ async function resolveSet(code, den) {
   const list = await getSets();
   let exact = code ? list.find(s => norm(s.id) === norm(code)) : null;
   let cands = den ? list.filter(s => String(s.official) === String(parseInt(den, 10))) : [];
-  if (!exact && code) { const fz = list.filter(s => norm(s.id).includes(norm(code)) || norm(code).includes(norm(s.id))); if (fz.length === 1) exact = fz[0]; else if (!cands.length) cands = fz; }
+  if (!exact && code && norm(code).length >= 3) { const fz = list.filter(s => norm(s.id).includes(norm(code)) || norm(code).includes(norm(s.id))); if (fz.length === 1) exact = fz[0]; else if (!cands.length) cands = fz; }
   if (!exact && cands.length === 1) exact = cands[0];
   return { exact, cands };
 }
@@ -386,18 +391,26 @@ function cropPx(src, sx, sy, sw, sh, targetW) {
 function variants(c, which) {
   const W = c.width, H = c.height, n = W * H;
   const p = c.getContext('2d').getImageData(0, 0, W, H).data;
-  const g = new Uint8ClampedArray(n); let mn = 255, mx = 0;
-  for (let i = 0; i < n; i++) { const v = p[i * 4] * .3 + p[i * 4 + 1] * .59 + p[i * 4 + 2] * .11; g[i] = v; if (v < mn) mn = v; if (v > mx) mx = v; }
+  const g = new Uint8ClampedArray(n), sat = new Uint8ClampedArray(n); let mn = 255, mx = 0;
+  for (let i = 0; i < n; i++) {
+    const r = p[i * 4], gg = p[i * 4 + 1], b = p[i * 4 + 2];
+    const v = r * .3 + gg * .59 + b * .11; g[i] = v; sat[i] = Math.max(r, gg, b) - Math.min(r, gg, b);
+    if (v < mn) mn = v; if (v > mx) mx = v;
+  }
   const k = 255 / Math.max(1, mx - mn), hist = new Array(256).fill(0);
   for (let i = 0; i < n; i++) { g[i] = (g[i] - mn) * k; hist[g[i]]++; }
   let sum = 0; for (let t = 0; t < 256; t++) sum += t * hist[t];
   let sB = 0, wB = 0, best = 0, th = 128;
   for (let t = 0; t < 256; t++) { wB += hist[t]; if (!wB) continue; const wF = n - wB; if (!wF) break; sB += t * hist[t]; const b = wB * wF * (sB / wB - (sum - sB) / wF) ** 2; if (b > best) { best = b; th = t; } }
-  const fns = { gray: v => v, inv: v => 255 - v, bin: v => v > th ? 255 : 0, binInv: v => v > th ? 0 : 255 };
+  // white: helle, ungesättigte Pixel = Schrift (weiße Schrift mit schwarzem Rand, z. B. Mega-Karten)
+  // dark: dunkle Pixel = Schrift (klassische schwarze Schrift)
+  const wTh = Math.max(150, th);
+  const fns = { gray: v => v, inv: v => 255 - v, bin: v => v > th ? 255 : 0, binInv: v => v > th ? 0 : 255,
+    white: (v, i) => (v > wTh && sat[i] < 70) ? 0 : 255, dark: (v, i) => v < Math.min(90, th) ? 0 : 255 };
   return which.map(w => {
     const o = document.createElement('canvas'); o.width = W; o.height = H; const ctx = o.getContext('2d');
     const od = ctx.createImageData(W, H), f = fns[w];
-    for (let i = 0; i < n; i++) { const v = f(g[i]); od.data[i * 4] = od.data[i * 4 + 1] = od.data[i * 4 + 2] = v; od.data[i * 4 + 3] = 255; }
+    for (let i = 0; i < n; i++) { const v = f(g[i], i); od.data[i * 4] = od.data[i * 4 + 1] = od.data[i * 4 + 2] = v; od.data[i * 4 + 3] = 255; }
     ctx.putImageData(od, 0, 0); return o;
   });
 }
@@ -408,8 +421,9 @@ function parseOCR(t) {
   let n = null, den = null, code = null;
   const promo = txt.match(/(\d{3})\s*\/\s*(S[VM]?-?P)\b/i);
   if (promo) { n = promo[1]; code = promo[2].toUpperCase(); }
-  const m = txt.match(/(\d{1,3})\s*\/\s*(\d{2,3})(?!\d)/);
-  if (!n && m) { n = m[1]; den = m[2]; }
+  const fixD = x => x.replace(/[Oo]/g, '0').replace(/[Il]/g, '1').replace(/S/g, '5').replace(/B/g, '8');
+  const m = txt.match(/([0-9OoIl]{2,3})\s*\/\s*([0-9OoIlSB]{2,3})(?![0-9])/);
+  if (!n && m && /\d/.test(m[1] + m[2])) { n = fixD(m[1]); den = fixD(m[2]); }
   if (!n && typeof setsCache !== 'undefined' && setsCache) {
     // Schrägstrich als 1/7/I gelesen: nur akzeptieren, wenn der Nenner eine echte Set-Größe ist
     const dens = new Set(setsCache.list.map(s => String(s.official)).filter(Boolean));
@@ -422,17 +436,37 @@ function parseOCR(t) {
   }
   return { n, den, code };
 }
-async function ocrCanvases(cs, psm) {
-  const w = await getWorker(); await w.setParameters({ tessedit_pageseg_mode: psm });
-  const found = { n: null, den: null, code: null }; let raw = '';
-  for (const cv of cs) {
-    const { data } = await w.recognize(cv); raw += data.text + '\n';
-    const p = parseOCR(data.text);
-    if (!found.n && p.n) { found.n = p.n; found.den = p.den; }
-    if (!found.code && p.code) found.code = p.code;
-    if (found.n && found.code) break;
+// Prüft, ob ein Leseergebnis zu einem echten Set passt – Unsinn wird verworfen
+function vetOCR(f) {
+  const out = { n: f.n, den: f.den, code: f.code, ok: false };
+  if (!out.n) return out;
+  const list = setsCache ? setsCache.list : null, n = parseInt(out.n, 10), d = out.den ? parseInt(out.den, 10) : null;
+  if (d !== null && (d < 20 || n > d * 2.5 + 30)) { out.den = null; }
+  const codeSet = out.code && list ? list.find(s => norm(s.id) === norm(out.code)) : null;
+  if (out.code && list && !codeSet) out.code = null;
+  const denKnown = out.den && list ? list.some(s => String(s.official) === String(parseInt(out.den, 10))) : false;
+  if (!list) out.ok = !!(out.code && out.den);
+  else out.ok = !!codeSet || denKnown;
+  return out;
+}
+async function ocrCanvases(cs, psms) {
+  const w = await getWorker();
+  let raw = '', best = null, partial = { n: null, den: null, code: null };
+  for (const psm of [].concat(psms)) {
+    await w.setParameters({ tessedit_pageseg_mode: psm });
+    for (const cv of cs) {
+      const { data } = await w.recognize(cv); raw += data.text + '\n';
+      const v = vetOCR(parseOCR(data.text));
+      if (v.ok) {
+        if (!best) best = v; else { if (!best.code && v.code) best.code = v.code; if (!best.den && v.den) best.den = v.den; }
+        if (best.code && best.den) return { found: best, raw, ok: true };
+      } else {
+        if (!partial.code && v.code) partial.code = v.code;
+      }
+    }
   }
-  return { found, raw };
+  if (best) { if (!best.code && partial.code) best.code = partial.code; return { found: best, raw, ok: true }; }
+  return { found: { n: null, den: null, code: partial.code }, raw, ok: false };
 }
 // Foto-Fallback (wenn Live-Kamera nicht geht)
 async function runOCR(file) {
@@ -443,7 +477,7 @@ async function runOCR(file) {
     await getWorker(); $('#ocrMsg').textContent = 'Lese Kartennummer …';
     for (const [x, y, ww, hh, psm] of [[0, .84, .62, .16, '6'], [0, .72, 1, .28, '6'], [0, 0, 1, 1, '11']]) {
       const base = cropCanvas(img, x, y, ww, hh, ww === 1 && hh === 1 ? 1400 : 1800); if (!prev) prev = base;
-      const r = await ocrCanvases(variants(base, ['gray', 'inv', 'binInv']), psm);
+      const r = await ocrCanvases(variants(base, ['white', 'dark', 'gray', 'binInv']), psm);
       raw += r.raw;
       if (!found.n && r.found.n) { found.n = r.found.n; found.den = r.found.den; }
       if (!found.code && r.found.code) found.code = r.found.code;
@@ -489,11 +523,11 @@ async function scanFrame(manual) {
     const mx = sw * .03, my = sh * .12;
     sx = Math.max(0, sx - mx); sy = Math.max(0, sy - my); sw = Math.min(vw - sx, sw + 2 * mx); sh = Math.min(vh - sy, sh + 2 * my);
     const base = cropPx(v, sx, sy, sw, sh, 1600);
-    const { found, raw } = await ocrCanvases(variants(base, manual ? ['gray', 'inv', 'bin', 'binInv'] : ['gray', 'inv']), '6');
+    const { found, raw, ok } = await ocrCanvases(variants(base, manual ? ['white', 'dark', 'gray', 'inv', 'binInv'] : ['white', 'dark', 'gray']), manual ? ['11', '6'] : '11');
     if (!scanStream) return;
     const line = raw.replace(/\s+/g, ' ').trim();
     $('#scanStatus').textContent = line ? 'Lese: ' + line.slice(0, 50) : 'Suche …';
-    if (found.n && (found.code || found.den)) {
+    if (ok) {
       if (navigator.vibrate) navigator.vibrate(60);
       closeScanner(); applyOCR(found, raw, base.toDataURL('image/jpeg', .8));
     } else if (manual) toast('Noch nicht lesbar – näher ran, ruhig halten, Licht prüfen');
@@ -565,7 +599,7 @@ function selectCm(id, keepMarket) {
   const r = R();
   $('#cmSel').classList.remove('hidden');
   $('#cmSel').innerHTML = `<div style="font-weight:700">${esc(p[1])}</div><div class="mut">${esc(p[2])} · Cardmarket</div>
-    <div class="prices"><div class="pbox"><div class="l">Niedrigster</div><div class="v">${p[6] ? fE(p[6]) : '–'}</div><div class="l">${p[6] ? fY(p[6] * r) : ''}</div></div>
+    <div class="prices"><div class="pbox"><div class="l">Niedrigster (alle Sprachen)</div><div class="v">${p[6] ? fE(p[6]) : '–'}</div><div class="l">${p[6] ? fY(p[6] * r) : ''}</div></div>
     <div class="pbox"><div class="l">Trend</div><div class="v">${p[4] ? fE(p[4]) : '–'}</div><div class="l">${p[4] ? fY(p[4] * r) : ''}</div></div></div>`;
   if (!keepMarket) {
     const v = cmVal(p);
@@ -605,21 +639,28 @@ async function thumb(file) {
 }
 
 /* ---------- Links ---------- */
-// Cardmarket-Link: direkt aufs Produkt (per Produkt-ID), sonst Suche
+// Cardmarket-Link: direkt aufs Produkt, gefiltert auf Japanisch + Verkäufer aus Deutschland + Zustand
+const COND_ID = { MT: 1, NM: 2, EX: 3, GD: 4, LP: 5, PL: 6, PO: 7 };
 function cmHref(id, query) {
-  return id ? `https://www.cardmarket.com/de/Pokemon/Products?idProduct=${id}`
-            : `https://www.cardmarket.com/de/Pokemon/Products/Search?searchString=${encodeURIComponent(query || '')}`;
+  const f = new URLSearchParams({ language: '7', sellerCountry: '7' });
+  if (cur && cur.type === 'Karte') f.set('minCondition', String(COND_ID[$('#fCond').value] || 2));
+  return id ? `https://www.cardmarket.com/de/Pokemon/Products?idProduct=${id}&${f}`
+            : `https://www.cardmarket.com/de/Pokemon/Products/Search?searchString=${encodeURIComponent(query || '')}&${f}`;
 }
 function cmLinkHtml(id, query) {
   if (!id && !query) return '';
-  return `<a href="${cmHref(id, query)}" target="_blank" rel="noopener">Auf Cardmarket öffnen ↗</a>`;
+  return `<a href="#" class="cmlink" data-id="${esc(id || '')}" data-q="${esc(query || '')}">Japanisch · DE-Verkäufer auf Cardmarket ↗</a>`;
 }
+document.addEventListener('click', e => {
+  const a = e.target.closest('.cmlink'); if (!a) return;
+  e.preventDefault(); window.open(cmHref(a.dataset.id, a.dataset.q), '_blank', 'noopener');
+});
 
 /* ---------- Erfassen-Flows ---------- */
 function resetForm(kind) {
   editId = null; $('#btnCancelEdit').classList.add('hidden'); $('#btnSave').textContent = 'Speichern';
   cur = { id: null, cmId: null, type: kind === 'sealed' ? 'Sealed' : 'Karte', set: '', setName: '', num: '', name: '', nameEn: '', jan: '', img: '', marketSrc: '' };
-  ['#fSet', '#fNum', '#fPrice', '#fMarket', '#fNote', '#fJan', '#fSealedName', '#fGrade', '#fUvp', '#fCmSearch'].forEach(s => $(s).value = '');
+  ['#fSet', '#fNum', '#fPrice', '#fMarket', '#fNote', '#fJan', '#fSealedName', '#fGrade', '#fUvp', '#fCmSearch', '#fQuick'].forEach(s => $(s).value = '');
   $('#cmSel').classList.add('hidden'); $('#cmResults').classList.add('hidden');
   $('#fQty').value = 1; $('#fDate').value = today(); $('#fCond').value = 'NM';
   $('#cardResult').innerHTML = ''; $('#setCands').innerHTML = ''; $('#sealedLinks').innerHTML = ''; $('#mktSrc').textContent = '';
@@ -670,7 +711,7 @@ function renderCardResult(card, set, pr) {
   const r = R();
   const priceHtml = pr ? `
     <div class="prices">
-      <div class="pbox"><div class="l">Niedrigster</div><div class="v">${pr.low ? fE(pr.low) : '–'}</div><div class="l">${pr.low ? fY(pr.low * r) : ''}</div></div>
+      <div class="pbox"><div class="l">Niedrigster (alle Sprachen)</div><div class="v">${pr.low ? fE(pr.low) : '–'}</div><div class="l">${pr.low ? fY(pr.low * r) : ''}</div></div>
       <div class="pbox"><div class="l">Trend</div><div class="v">${pr.trend ? fE(pr.trend) : '–'}</div><div class="l">${pr.trend ? fY(pr.trend * r) : ''}</div></div>
     </div>` : `<p class="mut">Für diese Karte liefert die Datenbank keinen Marktpreis. Preis aus Collectr unten eintragen oder über die Links nachsehen.</p>`;
   $('#cardResult').innerHTML = `
@@ -878,7 +919,21 @@ function showTab(id) {
 
 /* ---------- Events ---------- */
 $$('nav button').forEach(b => b.onclick = () => showTab(b.dataset.tab));
-$('#btnPhoto').onclick = openScanner;
+$('#btnPhoto').onclick = () => { resetForm('card'); getSets().catch(() => {}); const q = $('#fQuick'); q.focus(); q.scrollIntoView({ block: 'center' }); };
+$('#btnLiveScan').onclick = openScanner;
+let quickT;
+function handleQuick() {
+  const t = $('#fQuick').value; if (!t.trim()) return;
+  const v = vetOCR(parseOCR(t));
+  const n = v.n || (t.match(/\b(\d{1,3})\b/) || [])[1];
+  const code = v.code || parseOCR(t).code;
+  if (code) $('#fSet').value = code;
+  if (n) $('#fNum').value = v.den ? `${parseInt(n, 10)}/${v.den}` : parseInt(n, 10);
+  cur._den = v.den || parseOCR(t).den;
+  if (n && (code || cur._den)) { $('#fQuick').blur(); doLookup(); }
+}
+$('#fQuick').addEventListener('input', () => { clearTimeout(quickT); quickT = setTimeout(handleQuick, 450); });
+$('#fQuick').addEventListener('keydown', e => { if (e.key === 'Enter') { clearTimeout(quickT); handleQuick(); } });
 $('#scanCancel').onclick = closeScanner;
 $('#scanShot').onclick = () => scanFrame(true);
 $('#scanManual').onclick = () => { closeScanner(); $('#fSet').focus(); };
