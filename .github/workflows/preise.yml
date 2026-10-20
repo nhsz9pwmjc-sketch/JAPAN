@@ -1,0 +1,45 @@
+name: Cardmarket-Preise
+
+on:
+  schedule:
+    - cron: "17 4 * * *"   # täglich ca. 6 Uhr deutscher Zeit
+  workflow_dispatch:        # Knopf "Run workflow" zum manuellen Start
+
+permissions:
+  contents: write
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Cardmarket-Preisliste für Sealed laden
+        run: |
+          python3 - <<'EOF'
+          import json, urllib.request
+          B = "https://downloads.s3.cardmarket.com/productCatalog/"
+          def get(path):
+              req = urllib.request.Request(B + path, headers={"User-Agent": "Mozilla/5.0"})
+              return json.load(urllib.request.urlopen(req, timeout=120))
+          prods = get("productList/products_nonsingles_6.json")
+          guide = {g["idProduct"]: g for g in get("priceGuide/price_guide_6.json")["priceGuides"]}
+          out = []
+          for p in prods["products"]:
+              g = guide.get(p["idProduct"], {})
+              r = lambda v: round(v, 2) if isinstance(v, (int, float)) else None
+              out.append([p["idProduct"], p["name"], p.get("categoryName", "").replace("Pokémon ", ""),
+                          p.get("idExpansion"), r(g.get("trend")), r(g.get("avg30")), r(g.get("low"))])
+          data = {"date": prods.get("createdAt", "")[:10], "p": out}
+          with open("cm-sealed.json", "w", encoding="utf-8") as f:
+              json.dump(data, f, ensure_ascii=False, separators=(",", ":"))
+          print(len(out), "Produkte gespeichert")
+          EOF
+
+      - name: Speichern
+        run: |
+          git config user.name "preis-bot"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add cm-sealed.json
+          git diff --cached --quiet || git commit -m "Cardmarket-Preise aktualisiert"
+          git push
