@@ -304,7 +304,15 @@ function cmHref(id, query) {
   return id ? `https://www.cardmarket.com/de/Pokemon/Products?idProduct=${encodeURIComponent(id)}`
             : `https://www.cardmarket.com/de/Pokemon/Products/Search?searchString=${encodeURIComponent(query || '')}`;
 }
-const cmButton = (id, q) => (id || q) ? `<a class="cmbtn" href="${esc(cmHref(id, q))}" target="_blank" rel="noopener noreferrer">Auf Cardmarket öffnen ↗</a>` : '';
+const cmButton = (id, q) => (id || q) ? `<a class="cmbtn" href="${esc(cmHref(id, q))}" target="_blank" rel="noopener">Auf Cardmarket öffnen ↗</a>` : '';
+const isStandalone = () => window.navigator.standalone === true || matchMedia('(display-mode: standalone)').matches;
+document.addEventListener('click', e => {
+  const a = e.target.closest && e.target.closest('a.cmbtn'); if (!a) return;
+  saveDraft(true);
+  if (isStandalone()) return;            // Homescreen-App: iOS öffnet Safari darüber
+  const w = window.open(a.href, '_blank');
+  if (w) { e.preventDefault(); try { w.opener = null; } catch (x) {} }
+});
 function priceBoxes(low, trend) {
   const r = R();
   if (!low && !trend) return `<p class="mut">Kein Cardmarket-Preis in den Daten – auf Cardmarket nachsehen.</p>`;
@@ -409,7 +417,7 @@ async function doLookup(forceSet) {
       cmId: cm && (cm.idProduct || cm.productId) || null,
       low: pick('low', 'low-holo'), trend: pick('trend', 'avg30', 'avg7', 'trend-holo', 'avg30-holo')
     };
-    renderCardInfo(); offerLow(); updateDeal();
+    renderCardInfo(); offerLow(); updateDeal(); saveDraft(true);
     if (lang !== 'en') englishName(card).then(en => { if (en && F.card && F.card.name === card.name && en !== card.name) { F.card.nameEn = en; renderCardInfo(); } });
   } catch (e) {
     $('#cardInfo').innerHTML = `<div class="warn">${esc(e.message || 'Fehler bei der Suche')}</div>`;
@@ -483,7 +491,7 @@ function selectSealed(id) {
   const p = cmData && cmData.p.find(x => x[0] === id); if (!p) return;
   F.sealed = { cmId: p[0], name: p[1], cat: p[2], low: null, trend: null, added: p[7] || '' };
   $('#fSealedQ').value = p[1]; $('#sugg').classList.add('hidden'); $('#fSealedQ').blur();
-  renderSealedInfo(); offerLow(); updateDeal();
+  renderSealedInfo(); offerLow(); updateDeal(); saveDraft(true);
 }
 function renderSealedInfo() {
   const s = F.sealed;
@@ -588,10 +596,11 @@ async function save() {
   if (F.photo && F.photoChanged) await idbSet('photos', it.id, F.photo);
   settings.lang = it.lang; settings.place = it.place; LS.set('jh_settings', settings);
   if (old) items[items.indexOf(old)] = it; else items.unshift(it);
-  if (saveItems()) { toast(old ? 'Änderung gespeichert ✓' : 'Gespeichert ✓'); newForm(); renderList(); window.scrollTo(0, 0); }
+  if (saveItems()) { clearDraft(); toast(old ? 'Änderung gespeichert ✓' : 'Gespeichert ✓'); newForm(); renderList(); window.scrollTo(0, 0); }
 }
 async function openItem(id) {
   const i = items.find(x => x.id === id); if (!i) return;
+  if (!restoring) clearDraft();
   newForm(); editId = id;
   $('#fLang').value = i.lang || 'ja'; $('#fPlace').value = i.place || '';
   setType(i.type || 'Karte');
@@ -618,7 +627,7 @@ async function openItem(id) {
 function del() {
   if (!editId || !confirm('Diesen Eintrag wirklich löschen?')) return;
   items = items.filter(x => x.id !== editId); idbDel('photos', editId); saveItems();
-  toast('Gelöscht'); newForm(); renderList(); showTab('tabList');
+  clearDraft(); toast('Gelöscht'); newForm(); renderList(); showTab('tabList');
 }
 
 /* ---------- Liste ---------- */
@@ -717,12 +726,12 @@ function showTab(id) {
 
 /* ---------- Events ---------- */
 $$('nav button').forEach(b => b.onclick = () => showTab(b.dataset.tab));
-$('#segType').onclick = e => { const b = e.target.closest('button'); if (b) setType(b.dataset.v); };
+$('#segType').onclick = e => { const b = e.target.closest('button'); if (b) { setType(b.dataset.v); saveDraft(); } };
 $('#segCur').onclick = e => { const b = e.target.closest('button'); if (b) setCur(b.dataset.v); };
 $('#btnPhoto').onclick = $('#btnPhotoAgain').onclick = () => { $('#inPhoto').value = ''; $('#inPhoto').click(); };
 $('#inPhoto').onchange = async e => {
   const f = e.target.files[0]; if (!f) return;
-  try { const img = await fileToImg(f); F.photo = scaleImg(img, 1400, .78); F.thumb = scaleImg(img, 220, .6); F.photoChanged = true; showPhoto(F.photo); }
+  try { const img = await fileToImg(f); F.photo = scaleImg(img, 1400, .78); F.thumb = scaleImg(img, 220, .6); F.photoChanged = true; showPhoto(F.photo); saveDraft(true); }
   catch (err) { toast('Foto konnte nicht geladen werden'); }
 };
 $('#btnLookup').onclick = () => doLookup();
@@ -736,7 +745,7 @@ $('#btnTakeLow').onclick = () => { const s = F.type === 'Sealed' ? F.sealed : F.
 ['#fPrice', '#fMarket', '#fQty'].forEach(s => $(s).addEventListener('input', updateDeal));
 $('#btnSave').onclick = save;
 $('#btnDelete').onclick = del;
-$('#btnNew').onclick = () => { newForm(); window.scrollTo(0, 0); };
+$('#btnNew').onclick = () => { clearDraft(); newForm(); window.scrollTo(0, 0); };
 $('#list').onclick = e => { const b = e.target.closest('.item'); if (b) openItem(b.dataset.id); };
 $('#fSearch').oninput = renderList;
 $('#btnExport').onclick = $('#btnExport2').onclick = exportXlsx;
@@ -752,8 +761,44 @@ function fillPlaces() {
 }
 $('#fLang').onchange = () => { F.card = null; renderCardInfo(); $('#setCands').innerHTML = ''; offerLow(); getSets().catch(() => {}); if ($('#fCode').value.trim()) doLookup(); };
 
+/* ---------- Entwurf automatisch sichern ---------- */
+const DRAFT_FIELDS = ['#fLang', '#fCode', '#fSealedQ', '#fCond', '#fGrader', '#fGrade', '#fSealedCond', '#fMarket', '#fPrice', '#fDate', '#fQty', '#fPlace', '#fNote'];
+let draftT, restoring = false;
+function saveDraft(now) {
+  if (restoring || !F) return;
+  clearTimeout(draftT);
+  const run = () => {
+    const d = { editId, cur: curCurrency, F: Object.assign({}, F, { photo: null }), v: {} };
+    DRAFT_FIELDS.forEach(k => d.v[k] = $(k).value);
+    LS.set('jh_draft', d);
+    if (F.photo && F.photoChanged) idbSet('kv', 'draftPhoto', F.photo);
+  };
+  if (now) run(); else draftT = setTimeout(run, 300);
+}
+function clearDraft() { try { localStorage.removeItem('jh_draft'); } catch (e) {} idbDel('kv', 'draftPhoto'); }
+async function restoreDraft() {
+  const d = LS.get('jh_draft', null); if (!d || !d.F) return false;
+  const filled = d.v && (d.v['#fCode'] || d.v['#fSealedQ'] || d.v['#fPrice'] || d.v['#fMarket'] || d.F.thumb);
+  if (!filled) return false;
+  restoring = true;
+  if (d.editId && items.some(x => x.id === d.editId)) { await openItem(d.editId); }
+  F = Object.assign(F, d.F); editId = d.editId && items.some(x => x.id === d.editId) ? d.editId : null;
+  DRAFT_FIELDS.forEach(k => { if (d.v[k] !== undefined) $(k).value = d.v[k]; });
+  setType(F.type || 'Karte'); setCur(d.cur || 'JPY', true);
+  if (F.photoChanged) { const p = await idbGet('kv', 'draftPhoto'); if (p) { F.photo = p; showPhoto(p); } else if (F.thumb) showPhoto(F.thumb); }
+  renderCardInfo(); renderSealedInfo(); offerLow(); updateDeal();
+  restoring = false;
+  return true;
+}
+document.addEventListener('input', e => { if (e.target.closest && e.target.closest('#tabAdd')) saveDraft(); });
+document.addEventListener('change', e => { if (e.target.closest && e.target.closest('#tabAdd')) saveDraft(); });
+document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') saveDraft(true); });
+window.addEventListener('pagehide', () => saveDraft(true));
+
 /* ---------- Start ---------- */
 newForm(); renderRate(); renderList(); loadRate();
+restoreDraft().then(ok => { if (ok) toast('Angefangener Eintrag wiederhergestellt'); });
+window.addEventListener('pageshow', e => { if (e.persisted) restoreDraft(); });
 getSets().catch(() => {});
 idbGet('kv', 'cm').then(d => { if (d && !cmData) cmData = d; cmStatusText(); loadCM(true); });
 </script>
